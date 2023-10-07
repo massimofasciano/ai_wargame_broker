@@ -10,7 +10,8 @@ use tokio::sync::Mutex;
 use std::{net::SocketAddr, sync::Arc, collections::HashMap};
 use serde::{Deserialize, Serialize};
 
-type SharedState = Arc<Mutex<HashMap<String,GameTurn>>>;
+type SharedData = HashMap<String,GameTurn>;
+type SharedState = Arc<Mutex<SharedData>>;
 
 const CLIENT_AUTH : &str = "s3cr3t";
 const ADMIN_AUTH : &str = "ag3nt";
@@ -42,7 +43,9 @@ async fn main() {
 
     tracing_subscriber::fmt::init();
     let app = Router::new()
-        .route("/game/:gameid", get(send_move).post(recv_move))
+        .route("/game/:gameid", get(game_get).post(game_post))
+        .route("/admin/state", get(admin_state))
+        .route("/admin/reset", get(admin_reset))
         .with_state(shared_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
@@ -53,7 +56,7 @@ async fn main() {
         .unwrap();
 }
 
-async fn send_move(
+async fn game_get(
     Path(gameid): Path<String>,
     Query(params): Query<HashMap<String, String>>,
     State(state): State<SharedState>, 
@@ -71,7 +74,7 @@ async fn send_move(
     (StatusCode::OK, Json(reply))
 }
 
-async fn recv_move(
+async fn game_post(
     Path(gameid): Path<String>,
     Query(params): Query<HashMap<String, String>>,
     State(state): State<SharedState>, 
@@ -91,3 +94,27 @@ async fn recv_move(
     (StatusCode::OK, Json(reply))
 }
 
+async fn admin_state(
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<SharedState>, 
+) -> (StatusCode, Json<Option<SharedData>>) {
+    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
+    if auth != ADMIN_AUTH {
+        return (StatusCode::NOT_FOUND, Json(None));
+    }
+    let dict = state.lock().await;
+    (StatusCode::OK, Json(Some(dict.clone())))
+}
+
+async fn admin_reset(
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<SharedState>, 
+) -> (StatusCode, Json<Option<SharedData>>) {
+    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
+    if auth != ADMIN_AUTH {
+        return (StatusCode::NOT_FOUND, Json(None));
+    }
+    let mut dict = state.lock().await;
+    dict.clear();
+    (StatusCode::OK, Json(Some(dict.clone())))
+}
