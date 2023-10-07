@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     // response::IntoResponse,
     Json, Router,
-    extract::{Path, State}};
+    extract::{Path, State, Query}};
 // use serde_json::json;
 use tokio::sync::Mutex;
 use std::{net::SocketAddr, sync::Arc, collections::HashMap};
@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 type SharedState = Arc<Mutex<HashMap<String,GameTurn>>>;
 
-const GAMEID : &str = "qwerty";
+const CLIENT_AUTH : &str = "s3cr3t";
+const ADMIN_AUTH : &str = "ag3nt";
 
 #[derive(Serialize,Default,Debug,Clone)]
 struct GameReply {
@@ -41,11 +42,11 @@ async fn main() {
 
     tracing_subscriber::fmt::init();
     let app = Router::new()
-        .route("/:gameid", get(send_move).post(recv_move))
+        .route("/game/:gameid", get(send_move).post(recv_move))
         .with_state(shared_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
-    tracing::info!("listening on http://{addr}/{GAMEID}");
+    tracing::info!("listening on {addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
@@ -54,14 +55,16 @@ async fn main() {
 
 async fn send_move(
     Path(gameid): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
     State(state): State<SharedState>, 
 ) -> (StatusCode, Json<GameReply>) {
     let mut reply = GameReply::default();
-    // if gameid != GAMEID {
-    //     reply.success = false;
-    //     reply.error = Some(String::from("bad game id"));
-    //     return (StatusCode::NOT_FOUND, Json(reply));
-    // }
+    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
+    if auth != CLIENT_AUTH {
+        reply.success = false;
+        reply.error = Some(String::from("invalid client auth"));
+        return (StatusCode::NOT_FOUND, Json(reply));
+    }
     let dict = state.lock().await;
     reply.data = dict.get(&gameid).map(Clone::clone);
     reply.success = true;
@@ -69,16 +72,18 @@ async fn send_move(
 }
 
 async fn recv_move(
-    Path(gameid): Path<String>, 
+    Path(gameid): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
     State(state): State<SharedState>, 
     Json(payload): Json<GameTurn>
 ) -> (StatusCode, Json<GameReply>) {
     let mut reply = GameReply::default();
-    // if gameid != GAMEID {
-    //     reply.success = false;
-    //     reply.error = Some(String::from("bad game id"));
-    //     return (StatusCode::NOT_FOUND, Json(reply));
-    // }
+    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
+    if auth != CLIENT_AUTH {
+        reply.success = false;
+        reply.error = Some(String::from("invalid client auth"));
+        return (StatusCode::NOT_FOUND, Json(reply));
+    }
     let mut dict = state.lock().await;
     dict.insert(gameid, payload);
     reply.data = Some(payload);
