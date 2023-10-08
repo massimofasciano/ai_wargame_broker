@@ -1,0 +1,5 @@
+{
+    "client_auth": "s3cr3t", 
+    "admin_auth": "ag3nt",
+    "addr": "0.0.0.0:8000"
+}

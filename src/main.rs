@@ -7,14 +7,20 @@ use axum::{
     extract::{Path, State, Query}};
 // use serde_json::json;
 use tokio::sync::Mutex;
-use std::{net::SocketAddr, sync::Arc, collections::HashMap};
+use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr};
 use serde::{Deserialize, Serialize};
 
-type SharedData = HashMap<String,GameTurn>;
-type SharedState = Arc<Mutex<SharedData>>;
+const CONFIG_FILE: &str = "ai_wargame_broker.json";
 
-const CLIENT_AUTH : &str = "s3cr3t";
-const ADMIN_AUTH : &str = "ag3nt";
+type SharedState = Arc<SharedData>;
+type GameData = HashMap<String,GameTurn>;
+
+#[derive(Default,Debug)]
+struct SharedData {
+    game_data: Mutex<GameData>,
+    client_auth: String,
+    admin_auth: String,
+}
 
 #[derive(Serialize,Default,Debug,Clone)]
 struct GameReply {
@@ -37,9 +43,92 @@ struct GameCoord {
     col: u8,
 }
 
+#[derive(Serialize,Deserialize,Default,Debug,Clone)]
+struct Config {
+    client_auth: String,
+    admin_auth: String,
+    addr: String,
+}
+
+#[derive(Deserialize,Default,Debug,Clone)]
+struct RequestParams {
+    auth: Option<String>,
+}
+
+async fn game_get(
+    Path(gameid): Path<String>,
+    Query(params): Query<RequestParams>,
+    State(state): State<SharedState>, 
+) -> (StatusCode, Json<GameReply>) {
+    let mut reply = GameReply::default();
+    let auth = params.auth.unwrap_or_default();
+    if auth != state.client_auth {
+        reply.success = false;
+        reply.error = Some(String::from("invalid client auth"));
+        return (StatusCode::NOT_FOUND, Json(reply));
+    }
+    let dict = state.game_data.lock().await;
+    reply.data = dict.get(&gameid).map(Clone::clone);
+    reply.success = true;
+    (StatusCode::OK, Json(reply))
+}
+
+async fn game_post(
+    Path(gameid): Path<String>,
+    Query(params): Query<RequestParams>,
+    State(state): State<SharedState>, 
+    Json(payload): Json<GameTurn>
+) -> (StatusCode, Json<GameReply>) {
+    let mut reply = GameReply::default();
+    let auth = params.auth.unwrap_or_default();
+    if auth != state.client_auth {
+        reply.success = false;
+        reply.error = Some(String::from("invalid client auth"));
+        return (StatusCode::NOT_FOUND, Json(reply));
+    }
+    let mut dict = state.game_data.lock().await;
+    dict.insert(gameid, payload);
+    reply.data = Some(payload);
+    reply.success = true;
+    (StatusCode::OK, Json(reply))
+}
+
+async fn admin_state(
+    Query(params): Query<RequestParams>,
+    State(state): State<SharedState>, 
+) -> (StatusCode, Json<Option<GameData>>) {
+    let auth = params.auth.unwrap_or_default();
+    if auth != state.admin_auth {
+        return (StatusCode::NOT_FOUND, Json(None));
+    }
+    let dict = state.game_data.lock().await;
+    (StatusCode::OK, Json(Some(dict.clone())))
+}
+
+async fn admin_reset(
+    Query(params): Query<RequestParams>,
+    State(state): State<SharedState>, 
+) -> (StatusCode, Json<Option<GameData>>) {
+    let auth = params.auth.unwrap_or_default();
+    if auth != state.admin_auth {
+        return (StatusCode::NOT_FOUND, Json(None));
+    }
+    let mut dict = state.game_data.lock().await;
+    dict.clear();
+    (StatusCode::OK, Json(Some(dict.clone())))
+}
+
 #[tokio::main]
 async fn main() {
-    let shared_state = Arc::new(Mutex::new(HashMap::new()));
+    let config: Config = serde_json::from_str(
+        &read_to_string(CONFIG_FILE).expect("failed to open config file")
+    ).expect("JSON was not well-formatted");
+
+    let shared_state = Arc::new(SharedData { 
+        client_auth: config.client_auth, 
+        admin_auth: config.admin_auth,
+        ..Default::default()
+    });
 
     tracing_subscriber::fmt::init();
     let app = Router::new()
@@ -48,73 +137,10 @@ async fn main() {
         .route("/admin/reset", get(admin_reset))
         .with_state(shared_state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
+    let addr = SocketAddr::from_str(&config.addr).expect("invalid address"); //   from(([0, 0, 0, 0], 8000));
     tracing::info!("listening on {addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
-}
-
-async fn game_get(
-    Path(gameid): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-    State(state): State<SharedState>, 
-) -> (StatusCode, Json<GameReply>) {
-    let mut reply = GameReply::default();
-    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
-    if auth != CLIENT_AUTH {
-        reply.success = false;
-        reply.error = Some(String::from("invalid client auth"));
-        return (StatusCode::NOT_FOUND, Json(reply));
-    }
-    let dict = state.lock().await;
-    reply.data = dict.get(&gameid).map(Clone::clone);
-    reply.success = true;
-    (StatusCode::OK, Json(reply))
-}
-
-async fn game_post(
-    Path(gameid): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-    State(state): State<SharedState>, 
-    Json(payload): Json<GameTurn>
-) -> (StatusCode, Json<GameReply>) {
-    let mut reply = GameReply::default();
-    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
-    if auth != CLIENT_AUTH {
-        reply.success = false;
-        reply.error = Some(String::from("invalid client auth"));
-        return (StatusCode::NOT_FOUND, Json(reply));
-    }
-    let mut dict = state.lock().await;
-    dict.insert(gameid, payload);
-    reply.data = Some(payload);
-    reply.success = true;
-    (StatusCode::OK, Json(reply))
-}
-
-async fn admin_state(
-    Query(params): Query<HashMap<String, String>>,
-    State(state): State<SharedState>, 
-) -> (StatusCode, Json<Option<SharedData>>) {
-    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
-    if auth != ADMIN_AUTH {
-        return (StatusCode::NOT_FOUND, Json(None));
-    }
-    let dict = state.lock().await;
-    (StatusCode::OK, Json(Some(dict.clone())))
-}
-
-async fn admin_reset(
-    Query(params): Query<HashMap<String, String>>,
-    State(state): State<SharedState>, 
-) -> (StatusCode, Json<Option<SharedData>>) {
-    let auth = params.get("auth").map(AsRef::as_ref).unwrap_or("");
-    if auth != ADMIN_AUTH {
-        return (StatusCode::NOT_FOUND, Json(None));
-    }
-    let mut dict = state.lock().await;
-    dict.clear();
-    (StatusCode::OK, Json(Some(dict.clone())))
 }
