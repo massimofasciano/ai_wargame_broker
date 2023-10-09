@@ -61,7 +61,16 @@ struct ConfigAuth {
 struct ConfigTLS {
     cert: String,
     key: String,
-    enabled: bool,
+    enabled: ConfigTLSType,
+}
+
+#[derive(Deserialize,Default,Debug,Clone,PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum ConfigTLSType {
+    #[default]
+    Http,
+    Https,
+    Both,
 }
 
 #[derive(Deserialize,Debug,Clone)]
@@ -193,22 +202,35 @@ async fn main() {
         .with_state(shared_state);
 
     let addr = SocketAddr::from(config.network);
-    if config.tls.enabled {
-        let tls_config = RustlsConfig::from_pem_file(
-            PathBuf::from(config.tls.cert),
-            PathBuf::from(config.tls.key),
-        ).await.unwrap();
-        info!("listening on https://{addr}");
-        axum_server::bind_rustls(addr, tls_config)
-            .serve(app.into_make_service())
-            .await
-            .unwrap();
-    
-    } else {
-        info!("listening on http://{addr}");
-        axum::Server::bind(&addr)
-            .serve(app.into_make_service())
-            .await
-            .unwrap();
+    match config.tls.enabled {
+        ConfigTLSType::Http => {
+            info!("listening on http://{addr}");
+            axum::Server::bind(&addr)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        },
+        ConfigTLSType::Https => {
+            let tls_config = RustlsConfig::from_pem_file(
+                PathBuf::from(config.tls.cert),
+                PathBuf::from(config.tls.key),
+            ).await.unwrap();
+            info!("listening on https://{addr}");
+            axum_server::bind_rustls(addr, tls_config)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        },
+        ConfigTLSType::Both => {
+            let tls_config = RustlsConfig::from_pem_file(
+                PathBuf::from(config.tls.cert),
+                PathBuf::from(config.tls.key),
+            ).await.unwrap();
+            info!("listening on http+https://{addr}");
+            axum_server_dual_protocol::bind_dual_protocol(addr, tls_config)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        },
     }
 }

@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "axum-server",
+ "axum-server-dual-protocol",
  "serde",
  "serde_json",
  "tokio",
@@ -121,6 +122,23 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+]
+
+[[package]]
+name = "axum-server-dual-protocol"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d1a8f5076b5dbfeb706bcce30fe73caf20971e6e5ca80b83a7f1d990e73e185"
+dependencies = [
+ "axum-server",
+ "bytes",
+ "http",
+ "hyper",
+ "pin-project",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tower-layer",
 ]
 
 [[package]]
