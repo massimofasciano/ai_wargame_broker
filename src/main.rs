@@ -10,7 +10,7 @@ use tracing::info;
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
-const CONFIG_FILE: &str = "ai_wargame_broker.toml";
+const PROGNAME : &str = "ai_wargame_broker";
 
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
@@ -151,15 +151,31 @@ async fn admin_reset(
     (StatusCode::OK, Json(Some(dict.clone()))).into_response()
 }
 
+fn get_config_file_name(in_cwd: bool) -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|pb| if in_cwd {
+            pb.file_name().map(PathBuf::from)
+        } else {
+            Some(pb)
+        })
+        .unwrap_or(PathBuf::from(PROGNAME))
+        .with_extension("toml")
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    info!("Loading config from {:?} or {:?}",get_config_file_name(true),get_config_file_name(false));
+
     let config: Config = toml::from_str(
-        &read_to_string(CONFIG_FILE).unwrap_or(String::from(""))
+        &read_to_string(get_config_file_name(true))
+            .or(read_to_string(get_config_file_name(false)))
+            .unwrap_or(String::from(""))
     ).expect("TOML was not well-formatted");
 
-    info!("{:#?}",config);
+    // info!("{:#?}",config);
 
     let shared_state = Arc::new(SharedData { 
         client_auth: config.auth.client, 
