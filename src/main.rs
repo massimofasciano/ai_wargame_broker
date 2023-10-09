@@ -2,7 +2,7 @@ use axum::{
     routing::get,
     // routing::post,
     http::StatusCode,
-    // response::IntoResponse,
+    response::IntoResponse,
     Json, Router,
     extract::{Path, State, Query}};
 // use serde_json::json;
@@ -65,7 +65,7 @@ async fn game_get(
     if auth != state.client_auth {
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
-        return (StatusCode::NOT_FOUND, Json(reply));
+        return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     let dict = state.game_data.lock().await;
     reply.data = dict.get(&gameid).map(Clone::clone);
@@ -84,7 +84,7 @@ async fn game_post(
     if auth != state.client_auth {
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
-        return (StatusCode::NOT_FOUND, Json(reply));
+        return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     let mut dict = state.game_data.lock().await;
     dict.insert(gameid, payload);
@@ -96,26 +96,26 @@ async fn game_post(
 async fn admin_state(
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
-) -> (StatusCode, Json<Option<GameData>>) {
+) -> impl IntoResponse {
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
-        return (StatusCode::NOT_FOUND, Json(None));
+        return StatusCode::UNAUTHORIZED.into_response();
     }
     let dict = state.game_data.lock().await;
-    (StatusCode::OK, Json(Some(dict.clone())))
+    (StatusCode::OK, Json(Some(dict.clone()))).into_response()
 }
 
 async fn admin_reset(
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
-) -> (StatusCode, Json<Option<GameData>>) {
+) -> impl IntoResponse {
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
-        return (StatusCode::NOT_FOUND, Json(None));
+        return StatusCode::UNAUTHORIZED.into_response();
     }
     let mut dict = state.game_data.lock().await;
     dict.clear();
-    (StatusCode::OK, Json(Some(dict.clone())))
+    (StatusCode::OK, Json(Some(dict.clone()))).into_response()
 }
 
 #[tokio::main]
