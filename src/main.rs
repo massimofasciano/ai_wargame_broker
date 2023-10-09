@@ -10,8 +10,6 @@ use tracing::info;
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
-const PROGNAME : &str = "ai_wargame_broker";
-
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
 
@@ -159,7 +157,7 @@ fn get_config_file_name(in_cwd: bool) -> PathBuf {
         } else {
             Some(pb)
         })
-        .unwrap_or(PathBuf::from(PROGNAME))
+        .unwrap_or(PathBuf::from(env!("CARGO_PKG_NAME")))
         .with_extension("toml")
 }
 
