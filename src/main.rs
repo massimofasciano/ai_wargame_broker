@@ -41,6 +41,29 @@ struct GameCoord {
     col: u8,
 }
 
+enum Error {
+    RowToCharConversion
+}
+
+impl GameCoord {
+    pub fn try_to_letter_number_string(self) -> Result<String,Error> {
+        let row_char = if self.row < 26 { (self.row + b'A') as char } 
+        else if self.row < 52 { (self.row - 26 + b'a') as char }
+        else { '?' };
+        if row_char != '?' { Ok(format!("{}{}", row_char, self.col)) } 
+        else { Err(Error::RowToCharConversion) }
+    }
+    pub fn to_tuple_string(self) -> String {
+        format!("({},{})", self.row, self.col)
+    }
+}
+
+impl std::fmt::Display for GameCoord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.try_to_letter_number_string().unwrap_or(self.to_tuple_string()))
+    }
+}
+
 #[derive(Deserialize,Default,Debug,Clone)]
 #[serde(default)]
 struct Config {
@@ -132,6 +155,7 @@ async fn game_post(
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     let mut dict = state.game_data.lock().await;
+    info!("game {} turn {:03} move {} -> {}",gameid,payload.turn,payload.from,payload.to);
     dict.insert(gameid, payload);
     reply.data = Some(payload);
     reply.success = true;
