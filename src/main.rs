@@ -6,10 +6,11 @@ use axum::{
     extract::{Path, State, Query}};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
+use tracing::info;
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
-const CONFIG_FILE: &str = "ai_wargame_broker.json";
+const CONFIG_FILE: &str = "ai_wargame_broker.toml";
 
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
@@ -42,14 +43,44 @@ struct GameCoord {
     col: u8,
 }
 
-#[derive(Serialize,Deserialize,Default,Debug,Clone)]
+#[derive(Deserialize,Default,Debug,Clone)]
 struct Config {
-    client_auth: String,
-    admin_auth: String,
+    #[serde(default)]
+    network: ConfigNetwork,
+    #[serde(default)]
+    tls: ConfigTLS,
+    #[serde(default)]
+    auth: ConfigAuth,
+}
+
+#[derive(Deserialize,Default,Debug,Clone)]
+struct ConfigAuth {
+    #[serde(default)]
+    client: String,
+    #[serde(default)]
+    admin: String,
+}
+
+#[derive(Deserialize,Default,Debug,Clone)]
+struct ConfigTLS {
+    #[serde(default)]
+    cert: String,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    enabled: bool,
+}
+
+#[derive(Deserialize,Debug,Clone)]
+struct ConfigNetwork {
+    #[serde(default)]
     addr: String,
-    tls_cert: String,
-    tls_key: String,
-    ssl: bool,
+}
+
+impl Default for ConfigNetwork {
+    fn default() -> Self {
+        ConfigNetwork { addr: "127.0.0.1:8000".to_string() }
+    }
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -122,37 +153,40 @@ async fn admin_reset(
 
 #[tokio::main]
 async fn main() {
-    let config: Config = serde_json::from_str(
-        &read_to_string(CONFIG_FILE).expect("failed to open config file")
-    ).expect("JSON was not well-formatted");
+    tracing_subscriber::fmt::init();
+
+    let config: Config = toml::from_str(
+        &read_to_string(CONFIG_FILE).unwrap_or(String::from(""))
+    ).expect("TOML was not well-formatted");
+
+    info!("{:#?}",config);
 
     let shared_state = Arc::new(SharedData { 
-        client_auth: config.client_auth, 
-        admin_auth: config.admin_auth,
+        client_auth: config.auth.client, 
+        admin_auth: config.auth.admin,
         ..Default::default()
     });
 
-    tracing_subscriber::fmt::init();
     let app = Router::new()
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/reset", get(admin_reset))
         .with_state(shared_state);
 
-    let addr = SocketAddr::from_str(&config.addr).expect("invalid address");
-    if config.ssl {
+    let addr = SocketAddr::from_str(&config.network.addr).expect("invalid address");
+    if config.tls.enabled {
         let tls_config = RustlsConfig::from_pem_file(
-            PathBuf::from(config.tls_cert),
-            PathBuf::from(config.tls_key),
+            PathBuf::from(config.tls.cert),
+            PathBuf::from(config.tls.key),
         ).await.unwrap();
-        tracing::info!("listening on https://{addr}");
+        info!("listening on https://{addr}");
         axum_server::bind_rustls(addr, tls_config)
             .serve(app.into_make_service())
             .await
             .unwrap();
     
     } else {
-        tracing::info!("listening on http://{addr}");
+        info!("listening on http://{addr}");
         axum::Server::bind(&addr)
             .serve(app.into_make_service())
             .await

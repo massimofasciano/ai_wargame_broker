@@ -1,8 +1,0 @@
-{
-    "client_auth": "s3cr3t", 
-    "admin_auth": "ag3nt",
-    "tls_cert": "cert.pem",
-    "tls_key": "privkey.pem",
-    "ssl": false,
-    "addr": "0.0.0.0:8000"
-}
