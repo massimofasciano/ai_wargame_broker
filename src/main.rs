@@ -1,9 +1,9 @@
 use axum::{
     routing::get,
-    http::StatusCode,
+    http::{StatusCode, Uri},
     response::IntoResponse,
     Json, Router,
-    extract::{Path, State, Query}};
+    extract::{Path, State, Query, ConnectInfo, Host}};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -127,10 +127,12 @@ async fn game_get(
     Path(gameid): Path<String>,
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
+    // ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> (StatusCode, Json<GameReply>) {
     let mut reply = GameReply::default();
     let auth = params.auth.unwrap_or_default();
     if auth != state.client_auth {
+        // info!("failed auth from {addr}");
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
         return (StatusCode::UNAUTHORIZED, Json(reply));
@@ -145,17 +147,19 @@ async fn game_post(
     Path(gameid): Path<String>,
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(payload): Json<GameTurn>
 ) -> (StatusCode, Json<GameReply>) {
     let mut reply = GameReply::default();
     let auth = params.auth.unwrap_or_default();
     if auth != state.client_auth {
+        // info!("failed auth from {addr}");
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     let mut dict = state.game_data.lock().await;
-    info!("game {} turn {:03} move {} -> {}",gameid,payload.turn,payload.from,payload.to);
+    info!("game {} turn {:03} move {} -> {} from {addr}",gameid,payload.turn,payload.from,payload.to);
     dict.insert(gameid, payload);
     reply.data = Some(payload);
     reply.success = true;
@@ -165,9 +169,13 @@ async fn game_post(
 async fn admin_state(
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
+    info!("request from {addr} for {}{}",hostname,uri.path());
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
+        info!("failed auth from {addr}");
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let dict = state.game_data.lock().await;
@@ -177,9 +185,13 @@ async fn admin_state(
 async fn admin_reset(
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
+    info!("request from {addr} for {}{}",hostname,uri.path());
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
+        info!("failed auth from {addr}");
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let mut dict = state.game_data.lock().await;
@@ -230,7 +242,7 @@ async fn main() {
         ConfigTLSType::Http => {
             info!("listening on http://{addr}");
             axum::Server::bind(&addr)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
                 .unwrap();
         },
@@ -241,7 +253,7 @@ async fn main() {
             ).await.unwrap();
             info!("listening on https://{addr}");
             axum_server::bind_rustls(addr, tls_config)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
                 .unwrap();
         },
@@ -252,7 +264,7 @@ async fn main() {
             ).await.unwrap();
             info!("listening on http+https://{addr}");
             axum_server_dual_protocol::bind_dual_protocol(addr, tls_config)
-                .serve(app.into_make_service())
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
                 .unwrap();
         },
