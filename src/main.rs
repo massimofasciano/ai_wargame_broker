@@ -1,13 +1,12 @@
 use axum::{
     routing::get,
-    // routing::post,
     http::StatusCode,
     response::IntoResponse,
     Json, Router,
     extract::{Path, State, Query}};
-// use serde_json::json;
+use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
-use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr};
+use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 const CONFIG_FILE: &str = "ai_wargame_broker.json";
@@ -48,6 +47,9 @@ struct Config {
     client_auth: String,
     admin_auth: String,
     addr: String,
+    tls_cert: String,
+    tls_key: String,
+    ssl: bool,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -137,10 +139,23 @@ async fn main() {
         .route("/admin/reset", get(admin_reset))
         .with_state(shared_state);
 
-    let addr = SocketAddr::from_str(&config.addr).expect("invalid address"); //   from(([0, 0, 0, 0], 8000));
-    tracing::info!("listening on {addr}");
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let addr = SocketAddr::from_str(&config.addr).expect("invalid address");
+    if config.ssl {
+        let tls_config = RustlsConfig::from_pem_file(
+            PathBuf::from(config.tls_cert),
+            PathBuf::from(config.tls_key),
+        ).await.unwrap();
+        tracing::info!("listening on https://{addr}");
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    
+    } else {
+        tracing::info!("listening on http://{addr}");
+        axum::Server::bind(&addr)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    }
 }
