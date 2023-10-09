@@ -42,42 +42,47 @@ struct GameCoord {
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
+#[serde(default)]
 struct Config {
-    #[serde(default)]
     network: ConfigNetwork,
-    #[serde(default)]
     tls: ConfigTLS,
-    #[serde(default)]
     auth: ConfigAuth,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
+#[serde(default)]
 struct ConfigAuth {
-    #[serde(default)]
     client: String,
-    #[serde(default)]
     admin: String,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
+#[serde(default)]
 struct ConfigTLS {
-    #[serde(default)]
     cert: String,
-    #[serde(default)]
     key: String,
-    #[serde(default)]
     enabled: bool,
 }
 
 #[derive(Deserialize,Debug,Clone)]
+#[serde(default)] 
 struct ConfigNetwork {
-    #[serde(default)]
-    addr: String,
+    ip: String,
+    port: u32,
 }
 
 impl Default for ConfigNetwork {
     fn default() -> Self {
-        ConfigNetwork { addr: "127.0.0.1:8000".to_string() }
+        ConfigNetwork { 
+            ip: "127.0.0.1".to_string(), 
+            port: 8000,
+        }
+    }
+}
+
+impl From<ConfigNetwork> for SocketAddr {
+    fn from(value: ConfigNetwork) -> Self {
+        SocketAddr::from_str(&format!("{}:{}",value.ip,value.port)).expect("invalid address")
     }
 }
 
@@ -173,7 +178,7 @@ async fn main() {
             .unwrap_or(String::from(""))
     ).expect("TOML was not well-formatted");
 
-    // info!("{:#?}",config);
+    info!("{:#?}",config);
 
     let shared_state = Arc::new(SharedData { 
         client_auth: config.auth.client, 
@@ -187,7 +192,7 @@ async fn main() {
         .route("/admin/reset", get(admin_reset))
         .with_state(shared_state);
 
-    let addr = SocketAddr::from_str(&config.network.addr).expect("invalid address");
+    let addr = SocketAddr::from(config.network);
     if config.tls.enabled {
         let tls_config = RustlsConfig::from_pem_file(
             PathBuf::from(config.tls.cert),
