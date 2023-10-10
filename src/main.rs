@@ -6,6 +6,7 @@ use axum::{
     extract::{Path, State, Query, ConnectInfo, Host}};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
+use tower_http::services::ServeDir;
 use tracing::info;
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,14 @@ struct Config {
     network: ConfigNetwork,
     tls: ConfigTLS,
     auth: ConfigAuth,
+    statics: HashMap<String,ConfigStatic>,
+}
+
+#[derive(Deserialize,Default,Debug,Clone)]
+#[serde(default)]
+struct ConfigStatic {
+    uri: String,
+    path: String,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -231,11 +240,15 @@ async fn main() {
         ..Default::default()
     });
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/reset", get(admin_reset))
         .with_state(shared_state);
+
+    for (_, static_dir) in config.statics {
+        app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path));
+    }
 
     let addr = SocketAddr::from(config.network);
     match config.tls.enabled {
