@@ -6,8 +6,8 @@ use axum::{
     extract::{Path, State, Query, ConnectInfo, Host}};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
-use tower_http::services::ServeDir;
-use tracing::info;
+use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
+use tracing::{info, debug, warn, error};
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
@@ -136,12 +136,12 @@ async fn game_get(
     Path(gameid): Path<String>,
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
-    // ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> (StatusCode, Json<GameReply>) {
     let mut reply = GameReply::default();
     let auth = params.auth.unwrap_or_default();
     if auth != state.client_auth {
-        // info!("failed auth from {addr}");
+        debug!("failed auth from {addr}");
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
         return (StatusCode::UNAUTHORIZED, Json(reply));
@@ -149,6 +149,9 @@ async fn game_get(
     let dict = state.game_data.lock().await;
     reply.data = dict.get(&gameid).map(Clone::clone);
     reply.success = true;
+    if let Some(payload) = reply.data.as_ref() {
+        debug!("game {} turn {:03} move {} -> {} read from {addr}",gameid,payload.turn,payload.from,payload.to);
+    }
     (StatusCode::OK, Json(reply))
 }
 
@@ -162,13 +165,13 @@ async fn game_post(
     let mut reply = GameReply::default();
     let auth = params.auth.unwrap_or_default();
     if auth != state.client_auth {
-        // info!("failed auth from {addr}");
+        debug!("failed auth from {addr}");
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     let mut dict = state.game_data.lock().await;
-    info!("game {} turn {:03} move {} -> {} from {addr}",gameid,payload.turn,payload.from,payload.to);
+    info!("game {} turn {:03} move {} -> {} written from {addr}",gameid,payload.turn,payload.from,payload.to);
     dict.insert(gameid, payload);
     reply.data = Some(payload);
     reply.success = true;
@@ -184,7 +187,7 @@ async fn admin_state(
     info!("request from {addr} for {}{}",hostname,uri.path());
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
-        info!("failed auth from {addr}");
+        error!("failed auth from {addr}");
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let dict = state.game_data.lock().await;
@@ -200,7 +203,7 @@ async fn admin_reset(
     info!("request from {addr} for {}{}",hostname,uri.path());
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
-        info!("failed auth from {addr}");
+        error!("failed auth from {addr}");
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let mut dict = state.game_data.lock().await;
@@ -232,7 +235,7 @@ async fn main() {
             .unwrap_or(String::from(""))
     ).expect("TOML was not well-formatted");
 
-    info!("{:#?}",config);
+    debug!("{:#?}",config);
 
     let shared_state = Arc::new(SharedData { 
         client_auth: config.auth.client, 
@@ -247,13 +250,17 @@ async fn main() {
         .with_state(shared_state);
 
     for (_, static_dir) in config.statics {
-        app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path));
+        app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path)).layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::TRACE))
+                .on_response(trace::DefaultOnResponse::new().level(tracing::Level::DEBUG)),
+        );
     }
 
     let addr = SocketAddr::from(config.network);
     match config.tls.enabled {
         ConfigTLSType::Http => {
-            info!("listening on http://{addr}");
+            warn!("listening on http://{addr}");
             axum::Server::bind(&addr)
                 .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
@@ -264,7 +271,7 @@ async fn main() {
                 PathBuf::from(config.tls.cert),
                 PathBuf::from(config.tls.key),
             ).await.unwrap();
-            info!("listening on https://{addr}");
+            warn!("listening on https://{addr}");
             axum_server::bind_rustls(addr, tls_config)
                 .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
@@ -275,7 +282,7 @@ async fn main() {
                 PathBuf::from(config.tls.cert),
                 PathBuf::from(config.tls.key),
             ).await.unwrap();
-            info!("listening on http+https://{addr}");
+            warn!("listening on http+https://{addr}");
             axum_server_dual_protocol::bind_dual_protocol(addr, tls_config)
                 .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
