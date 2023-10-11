@@ -1,15 +1,18 @@
 use axum::{
     routing::get,
     http::{StatusCode, Uri},
-    response::IntoResponse,
+    response::{IntoResponse, Redirect},
     Json, Router,
     extract::{Path, State, Query, ConnectInfo, Host}};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
 use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
 use tracing::{info, debug, warn, error};
-use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
+use std::{net::SocketAddr, sync::{Arc, OnceLock}, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "internal")]
+pub mod internal;
 
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
@@ -72,6 +75,13 @@ struct Config {
     tls: ConfigTLS,
     auth: ConfigAuth,
     statics: HashMap<String,ConfigStatic>,
+    general: ConfigGeneral,
+}
+
+#[derive(Deserialize,Default,Debug,Clone)]
+#[serde(default)]
+struct ConfigGeneral {
+    internal: Option<String>,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -223,6 +233,8 @@ fn get_config_file_name(in_cwd: bool) -> PathBuf {
         .with_extension("toml")
 }
 
+static CONFIG : OnceLock<Config> = OnceLock::new();
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -234,8 +246,8 @@ async fn main() {
             .or(read_to_string(get_config_file_name(false)))
             .unwrap_or(String::from(""))
     ).expect("TOML was not well-formatted");
-
     debug!("{:#?}",config);
+    CONFIG.set(config.clone()).unwrap();
 
     let shared_state = Arc::new(SharedData { 
         client_auth: config.auth.client, 
@@ -250,11 +262,27 @@ async fn main() {
         .with_state(shared_state);
 
     for (_, static_dir) in config.statics {
-        app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path)).layer(
-            TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::TRACE))
-                .on_response(trace::DefaultOnResponse::new().level(tracing::Level::DEBUG)),
-        );
+        app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::TRACE))
+                    .on_response(trace::DefaultOnResponse::new().level(tracing::Level::DEBUG)),
+            );
+    }
+
+    #[cfg(feature = "internal")]
+    {
+        if let Some(internal_uri) = config.general.internal.as_deref() {
+            if internal_uri.ends_with('/') {
+                app = app.nest(internal_uri,internal::router())
+            } else {
+                app = app.nest(&format!("{}/",internal_uri),internal::router())
+                    .route(internal_uri, get(|| async { 
+                        let target = format!("{}/",CONFIG.get().unwrap().general.internal.clone().as_deref().unwrap());
+                        Redirect::permanent(&target)
+                    }));
+            }
+        }
     }
 
     let addr = SocketAddr::from(config.network);
