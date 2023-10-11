@@ -8,7 +8,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::Mutex;
 use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
 use tracing::{info, debug, warn, error};
-use std::{net::SocketAddr, sync::{Arc, OnceLock}, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
+use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "internal")]
@@ -268,7 +268,7 @@ async fn main() {
         } else {
             // set up route for .../uri/ and redirect .../uri to .../uri/
             let with_slash = format!("{}/",static_dir.uri);
-            app = app.nest(&with_slash,internal::router())
+            app = app.nest_service(&with_slash, ServeDir::new(static_dir.path))
                 .layer(trace_layer)
                 .route(static_dir.uri.as_str(), get(|| async { 
                     let target = with_slash; // take ownership
