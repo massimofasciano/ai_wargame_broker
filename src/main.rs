@@ -11,9 +11,6 @@ use tracing::{info, debug, warn, error};
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "internal")]
-pub mod internal;
-
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
 
@@ -327,3 +324,28 @@ async fn main() {
         },
     }
 }
+
+#[cfg(feature = "internal")]
+pub mod internal {
+    use axum::{http::header, Router, routing::get};
+
+    pub fn router() -> Router {
+        Router::new()
+            .route("/", get(|| async {
+                ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], include_bytes!("../../ai_wargame_web/index.html"))
+            }))
+            .route("/game.js", get(|| async {
+                ([(header::CONTENT_TYPE, "text/javascript")], include_bytes!("../../ai_wargame_web/game.js"))
+            }))
+            .route("/game.css", get(|| async {
+                ([(header::CONTENT_TYPE, "text/css")], include_bytes!("../../ai_wargame_web/game.css"))
+            }))
+            .route("/pkg/ai_wargame_web.js", get(|| async {
+                ([(header::CONTENT_TYPE, "text/javascript")], include_bytes!("../../ai_wargame_web/pkg/ai_wargame_web.js"))
+            }))
+            .route("/pkg/ai_wargame_web_bg.wasm", get(|| async {
+                ([(header::CONTENT_TYPE, "application/wasm")], include_bytes!("../../ai_wargame_web/pkg/ai_wargame_web_bg.wasm"))
+            }))
+    }
+}
+
