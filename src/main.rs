@@ -233,8 +233,6 @@ fn get_config_file_name(in_cwd: bool) -> PathBuf {
         .with_extension("toml")
 }
 
-static CONFIG : OnceLock<Config> = OnceLock::new();
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -247,7 +245,6 @@ async fn main() {
             .unwrap_or(String::from(""))
     ).expect("TOML was not well-formatted");
     debug!("{:#?}",config);
-    CONFIG.set(config.clone()).unwrap();
 
     let shared_state = Arc::new(SharedData { 
         client_auth: config.auth.client, 
@@ -262,12 +259,22 @@ async fn main() {
         .with_state(shared_state);
 
     for (_, static_dir) in config.statics {
-        app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path))
-            .layer(
-                TraceLayer::new_for_http()
-                    .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::TRACE))
-                    .on_response(trace::DefaultOnResponse::new().level(tracing::Level::DEBUG)),
-            );
+        let trace_layer = TraceLayer::new_for_http()
+            .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::TRACE))
+            .on_response(trace::DefaultOnResponse::new().level(tracing::Level::DEBUG));
+        if static_dir.uri.ends_with('/') {
+            app = app.nest_service(static_dir.uri.as_str(), ServeDir::new(static_dir.path))
+                .layer(trace_layer);
+        } else {
+            // set up route for .../uri/ and redirect .../uri to .../uri/
+            let with_slash = format!("{}/",static_dir.uri);
+            app = app.nest(&with_slash,internal::router())
+                .layer(trace_layer)
+                .route(static_dir.uri.as_str(), get(|| async { 
+                    let target = with_slash; // take ownership
+                    Redirect::permanent(&target)
+                }));
+        }
     }
 
     #[cfg(feature = "internal")]
@@ -276,9 +283,11 @@ async fn main() {
             if internal_uri.ends_with('/') {
                 app = app.nest(internal_uri,internal::router())
             } else {
-                app = app.nest(&format!("{}/",internal_uri),internal::router())
+                // set up route for .../uri/ and redirect .../uri to .../uri/
+                let with_slash = format!("{}/",internal_uri);
+                app = app.nest(&with_slash,internal::router())
                     .route(internal_uri, get(|| async { 
-                        let target = format!("{}/",CONFIG.get().unwrap().general.internal.clone().as_deref().unwrap());
+                        let target = with_slash; // take ownership
                         Redirect::permanent(&target)
                     }));
             }
