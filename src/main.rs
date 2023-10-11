@@ -1,6 +1,6 @@
 use axum::{
     routing::get,
-    http::{StatusCode, Uri},
+    http::{StatusCode, Uri, header},
     response::{IntoResponse, Redirect},
     Json, Router,
     extract::{Path, State, Query, ConnectInfo, Host}};
@@ -276,13 +276,26 @@ async fn main() {
 
     #[cfg(feature = "internal")]
     {
+        macro_rules! get_bytes {
+            ($ctype:expr,$s:expr) => {
+                get(|| async {
+                    ([(header::CONTENT_TYPE, $ctype)], include_bytes!(concat!("../../ai_wargame_web/",$s)))
+                })
+            };
+        }
+        let internal_router = Router::new()
+            .route("/", get_bytes!("text/html; charset=utf-8","index.html"))
+            .route("/game.js", get_bytes!("text/javascript","game.js"))
+            .route("/game.css", get_bytes!("text/css","game.css"))
+            .route("/pkg/ai_wargame_web.js", get_bytes!("text/javascript","pkg/ai_wargame_web.js"))
+            .route("/pkg/ai_wargame_web_bg.wasm", get_bytes!("application/wasm","pkg/ai_wargame_web_bg.wasm"));
         if let Some(internal_uri) = config.general.internal.as_deref() {
             if internal_uri.ends_with('/') {
-                app = app.nest(internal_uri,internal::router())
+                app = app.nest(internal_uri,internal_router)
             } else {
                 // set up route for .../uri/ and redirect .../uri to .../uri/
                 let with_slash = format!("{}/",internal_uri);
-                app = app.nest(&with_slash,internal::router())
+                app = app.nest(&with_slash,internal_router)
                     .route(internal_uri, get(|| async { 
                         let target = with_slash; // take ownership
                         Redirect::permanent(&target)
@@ -324,28 +337,3 @@ async fn main() {
         },
     }
 }
-
-#[cfg(feature = "internal")]
-pub mod internal {
-    use axum::{http::header, Router, routing::get};
-
-    pub fn router() -> Router {
-        Router::new()
-            .route("/", get(|| async {
-                ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], include_bytes!("../../ai_wargame_web/index.html"))
-            }))
-            .route("/game.js", get(|| async {
-                ([(header::CONTENT_TYPE, "text/javascript")], include_bytes!("../../ai_wargame_web/game.js"))
-            }))
-            .route("/game.css", get(|| async {
-                ([(header::CONTENT_TYPE, "text/css")], include_bytes!("../../ai_wargame_web/game.css"))
-            }))
-            .route("/pkg/ai_wargame_web.js", get(|| async {
-                ([(header::CONTENT_TYPE, "text/javascript")], include_bytes!("../../ai_wargame_web/pkg/ai_wargame_web.js"))
-            }))
-            .route("/pkg/ai_wargame_web_bg.wasm", get(|| async {
-                ([(header::CONTENT_TYPE, "application/wasm")], include_bytes!("../../ai_wargame_web/pkg/ai_wargame_web_bg.wasm"))
-            }))
-    }
-}
-
