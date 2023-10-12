@@ -1,5 +1,5 @@
 use axum::{
-    routing::get,
+    routing::{get, delete},
     http::{StatusCode, Uri, header},
     response::{IntoResponse, Redirect},
     Json, Router,
@@ -11,6 +11,7 @@ use tracing::{info, debug, warn, error};
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf, time::{Duration, SystemTime}};
 use serde::{Deserialize, Serialize};
 use askama::Template;
+use nanoid::nanoid;
 
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
@@ -153,6 +154,25 @@ struct GameTemplate<'a> {
     game_data: &'a GameData,
 }
 
+async fn game_generate(
+    Query(params): Query<RequestParams>,
+    State(state): State<SharedState>, 
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    let auth = params.auth.unwrap_or_default();
+    if auth != state.client_auth {
+        debug!("failed auth from {addr}");
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let dict = state.game_data.lock().await;
+    let mut gameid;
+    loop {
+        gameid = nanoid!(8);
+        if dict.get(&gameid).is_none() { break; }
+    }
+    (StatusCode::OK, gameid).into_response()
+}
+
 async fn game_get(
     Path(gameid): Path<String>,
     Query(params): Query<RequestParams>,
@@ -206,7 +226,7 @@ async fn admin_state(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
-    info!("request from {addr} for {}{}",hostname,uri.path());
+    debug!("request from {addr} for {}{}",hostname,uri.path());
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
         error!("failed auth from {addr}");
@@ -216,21 +236,21 @@ async fn admin_state(
     (StatusCode::OK, GameTemplate { refresh: params.refresh, game_data: &dict }.into_response()).into_response()
 }
 
-async fn admin_reset(
+async fn admin_clear(
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
-    info!("request from {addr} for {}{}",hostname,uri.path());
+    warn!("request from {addr} for {}{}",hostname,uri.path());
     let auth = params.auth.unwrap_or_default();
     if auth != state.admin_auth {
         error!("failed auth from {addr}");
-        return StatusCode::UNAUTHORIZED.into_response();
+        return StatusCode::UNAUTHORIZED;
     }
     let mut dict = state.game_data.lock().await;
     dict.clear();
-    (StatusCode::OK, Json(Some(dict.clone()))).into_response()
+    StatusCode::OK
 }
 
 fn get_config_file_name(in_cwd: bool) -> PathBuf {
@@ -254,7 +274,7 @@ async fn cleaner(expires_secs: u64, cleanup_interval_secs: u64, state: SharedSta
             if let Some(last_update) = turndata.updated {
                 if let Ok(age) = last_update.elapsed() {
                     if age.as_secs() > expires_secs {
-                        info!("{gameid} has expired");
+                        info!("game {gameid} has expired");
                         return false;
                     }
                 }
@@ -285,9 +305,10 @@ async fn main() {
     });
 
     let mut app = Router::new()
+        .route("/game", get(game_generate))
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
-        .route("/admin/reset", get(admin_reset))
+        .route("/admin/clear", delete(admin_clear))
         .with_state(shared_state.clone());
 
     for (_, static_dir) in config.statics {
