@@ -10,6 +10,7 @@ use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
 use tracing::{info, debug, warn, error};
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
 use serde::{Deserialize, Serialize};
+use askama::Template;
 
 type SharedState = Arc<SharedData>;
 type GameData = HashMap<String,GameTurn>;
@@ -139,6 +140,21 @@ struct RequestParams {
     auth: Option<String>,
 }
 
+#[derive(Template)]
+#[template(path = "hello.html")]
+struct HelloTemplate<'a> {
+    name: &'a str,
+    game_data: &'a GameData,
+}
+
+async fn hello_get(
+    Path(name): Path<String>,
+    State(state): State<SharedState>, 
+) -> impl IntoResponse {
+    let dict = state.game_data.lock().await;
+    HelloTemplate { name: &name, game_data: &dict }.into_response()
+}
+
 async fn game_get(
     Path(gameid): Path<String>,
     Query(params): Query<RequestParams>,
@@ -250,6 +266,7 @@ async fn main() {
     });
 
     let mut app = Router::new()
+        .route("/hello/:name", get(hello_get))
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/reset", get(admin_reset))

@@ -1,0 +1,10 @@
+Hello, {{ name }}!
+{% for (gameid,turndata) in game_data %}
+    <li>{{ gameid }}
+        <li>{{ turndata.turn }}</li>
+        <li>{{ turndata.from.row }}</li>
+        <li>{{ turndata.from.col }}</li>
+        <li>{{ turndata.to.row }}</li>
+        <li>{{ turndata.to.col }}</li>
+    </li>
+{% endfor %}
