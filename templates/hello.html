@@ -2,6 +2,14 @@
 <html>
 <head>
 
+{% match refresh %}
+  {% when Some with (seconds) %}
+    <meta http-equiv="refresh" content="{{ seconds }}">
+  {% when None %}
+{% endmatch %}
+
+<title>AI Wargame - Broker Internal State</title>
+
 <style>
 {% include "styled-table.css" %}
 </style>
@@ -16,6 +24,7 @@
     <th>Turn</th>
     <th>From</th>
     <th>To</th>
+    <th>Age</th>
 </tr>
 </thead>
 {% for (gameid,turndata) in game_data %}
@@ -24,6 +33,16 @@
     <td>{{ turndata.turn }}</td>
     <td>{{ turndata.from }}</td>
     <td>{{ turndata.to }}</td>
+    <td>{% match turndata.updated %}
+        {% when Some with (update) %}
+            {% match update.elapsed() %}
+            {% when Ok with (duration) %}
+                {{ duration.as_secs() }}s
+            {% when Err with (_) %}
+            {% endmatch %}
+          {% when None %}
+        {% endmatch %}
+    </td>
 </tr>
 {% endfor %}
 </td>

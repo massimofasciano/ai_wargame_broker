@@ -18,3 +18,5 @@ enabled = "both"
 
 [general]
 internal = "/internal"
+expires = 5
+cleanup = 1

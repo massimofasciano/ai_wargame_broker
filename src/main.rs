@@ -5,10 +5,10 @@ use axum::{
     Json, Router,
     extract::{Path, State, Query, ConnectInfo, Host}};
 use axum_server::tls_rustls::RustlsConfig;
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::sleep};
 use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
 use tracing::{info, debug, warn, error};
-use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf};
+use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf, time::{Duration, SystemTime}};
 use serde::{Deserialize, Serialize};
 use askama::Template;
 
@@ -35,6 +35,9 @@ struct GameTurn {
     from : GameCoord,
     to : GameCoord,
     turn: u16,
+    #[serde(skip_deserializing)]
+    #[serde(skip_serializing)]
+    updated: Option<SystemTime>,
 }
 
 #[derive(Serialize,Deserialize,Default,Debug,Clone,Copy)]
@@ -80,6 +83,8 @@ struct Config {
 #[serde(default)]
 struct ConfigGeneral {
     internal: Option<String>,
+    expires: Option<u64>,
+    cleanup: Option<u64>,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -138,11 +143,13 @@ impl From<ConfigNetwork> for SocketAddr {
 #[derive(Deserialize,Default,Debug,Clone)]
 struct RequestParams {
     auth: Option<String>,
+    refresh: Option<usize>,
 }
 
 #[derive(Template)]
 #[template(path = "hello.html")]
 struct GameTemplate<'a> {
+    refresh: Option<usize>,
     game_data: &'a GameData,
 }
 
@@ -174,7 +181,7 @@ async fn game_post(
     Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Json(payload): Json<GameTurn>
+    Json(mut payload): Json<GameTurn>
 ) -> (StatusCode, Json<GameReply>) {
     let mut reply = GameReply::default();
     let auth = params.auth.unwrap_or_default();
@@ -184,6 +191,7 @@ async fn game_post(
         reply.error = Some(String::from("invalid client auth"));
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
+    payload.updated = Some(SystemTime::now());
     let mut dict = state.game_data.lock().await;
     info!("game {} turn {:03} move {} -> {} written from {addr}",gameid,payload.turn,payload.from,payload.to);
     dict.insert(gameid, payload);
@@ -205,7 +213,7 @@ async fn admin_state(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let dict = state.game_data.lock().await;
-    (StatusCode::OK, GameTemplate { game_data: &dict }.into_response()).into_response()
+    (StatusCode::OK, GameTemplate { refresh: params.refresh, game_data: &dict }.into_response()).into_response()
 }
 
 async fn admin_reset(
@@ -237,6 +245,26 @@ fn get_config_file_name(in_cwd: bool) -> PathBuf {
         .with_extension("toml")
 }
 
+async fn cleaner(expires_secs: u64, cleanup_interval_secs: u64, state: SharedState) {
+    loop {
+        sleep(Duration::from_secs(cleanup_interval_secs)).await;
+        debug!("cleaner starting");
+        let mut dict = state.game_data.lock().await;
+        dict.retain(|gameid, turndata| {
+            if let Some(last_update) = turndata.updated {
+                if let Ok(age) = last_update.elapsed() {
+                    if age.as_secs() > expires_secs {
+                        info!("{gameid} has expired");
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+        debug!("cleaner ending");
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -260,7 +288,7 @@ async fn main() {
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/reset", get(admin_reset))
-        .with_state(shared_state);
+        .with_state(shared_state.clone());
 
     for (_, static_dir) in config.statics {
         let trace_layer = TraceLayer::new_for_http()
@@ -308,6 +336,13 @@ async fn main() {
                         Redirect::permanent(&target)
                     }));
             }
+        }
+    }
+
+    if let Some(interval_secs) = config.general.cleanup {
+        if let Some(expires_secs) = config.general.expires {
+            tokio::spawn(cleaner(expires_secs, interval_secs, shared_state.clone()));
+
         }
     }
 
