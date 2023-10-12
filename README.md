@@ -21,11 +21,12 @@ This allows two programs with the same GAME_ID to play in sync with each other v
 
 - /admin/state<br>
 Shows a summary of the internal state associated with all game ids tracked by the broker.
+If specified, refresh=N will force a refresh of the page every N seconds.
 
 - /admin/clear<br>
 Clears all game ids.
 
-To use the game broker with the Python template for Ai Wargame, you have to pass it as a command line option as show below:
+To use the game broker with the Python template for AI Wargame, you have to pass it as a command line option as show below:
 
 - Player 1 runs: <br>
 python ai_wargame.py --broker 'https://ai-wargame.csproject.org:10501/game/team23-vs-team21?auth=my-secret-code' --game_type attacker
