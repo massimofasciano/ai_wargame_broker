@@ -170,7 +170,7 @@ async fn game_generate(
         gameid = nanoid!(8);
         if dict.get(&gameid).is_none() { break; }
     }
-    (StatusCode::OK, gameid).into_response()
+    (StatusCode::OK, format!("{}\n",gameid)).into_response()
 }
 
 async fn game_get(
