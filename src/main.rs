@@ -142,17 +142,8 @@ struct RequestParams {
 
 #[derive(Template)]
 #[template(path = "hello.html")]
-struct HelloTemplate<'a> {
-    name: &'a str,
+struct GameTemplate<'a> {
     game_data: &'a GameData,
-}
-
-async fn hello_get(
-    Path(name): Path<String>,
-    State(state): State<SharedState>, 
-) -> impl IntoResponse {
-    let dict = state.game_data.lock().await;
-    HelloTemplate { name: &name, game_data: &dict }.into_response()
 }
 
 async fn game_get(
@@ -214,7 +205,7 @@ async fn admin_state(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let dict = state.game_data.lock().await;
-    (StatusCode::OK, Json(Some(dict.clone()))).into_response()
+    (StatusCode::OK, GameTemplate { game_data: &dict }.into_response()).into_response()
 }
 
 async fn admin_reset(
@@ -266,7 +257,6 @@ async fn main() {
     });
 
     let mut app = Router::new()
-        .route("/hello/:name", get(hello_get))
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/reset", get(admin_reset))

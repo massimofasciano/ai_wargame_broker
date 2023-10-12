@@ -1,10 +1,33 @@
-Hello, {{ name }}!
+<!DOCTYPE html>
+<html>
+<head>
+
+<style>
+{% include "styled-table.css" %}
+</style>
+
+</head>
+<body>
+
+<table class="styled-table">
+<thead>
+<tr>
+    <th>Game ID</th>
+    <th>Turn</th>
+    <th>From</th>
+    <th>To</th>
+</tr>
+</thead>
 {% for (gameid,turndata) in game_data %}
-    <li>{{ gameid }}
-        <li>{{ turndata.turn }}</li>
-        <li>{{ turndata.from.row }}</li>
-        <li>{{ turndata.from.col }}</li>
-        <li>{{ turndata.to.row }}</li>
-        <li>{{ turndata.to.col }}</li>
-    </li>
+<tr>
+    <td>{{ gameid }}</td>
+    <td>{{ turndata.turn }}</td>
+    <td>{{ turndata.from }}</td>
+    <td>{{ turndata.to }}</td>
+</tr>
 {% endfor %}
+</td>
+</table>
+
+</body>
+</html>
