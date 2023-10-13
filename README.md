@@ -7,6 +7,15 @@ https://USER:PASSWORD@SERVER_ADDRESS/API_COMMAND
 for example:
 https://USER:PASSWORD@ai-wargame.csproject.org:10501/game/team23-vs-team21
 
+The USER and PASSWORD are managed using basic auth. This works on all browsers.
+https://SERVER_ADDRESS/API_COMMAND
+will work if USER and PASSWORD are sent via the request header "Authorization".
+
+Some clients (Python, Rust, most browsers) also support the https://USER:PASSWORD@... syntax.
+
+If your client does not support it and sending auth via the headers is impossible, you can use the legacy query params "username" and "password".
+https://SERVER_ADDRESS/API_COMMAND?username=USER&password=PASSWORD
+
 Here is a summary of the API commands. When not specified, they are http GET commands and they require a user and a password.
 
 - /game<br>

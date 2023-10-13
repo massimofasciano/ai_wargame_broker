@@ -154,6 +154,8 @@ impl From<ConfigNetwork> for SocketAddr {
 #[derive(Deserialize,Default,Debug,Clone)]
 struct RequestParams {
     refresh: Option<usize>,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 #[derive(Template)]
@@ -311,18 +313,32 @@ fn authenticate() -> impl IntoResponse {
 
 async fn auth_basic<B>(
     auth: Option<TypedHeader<Authorization<Basic>>>,
+    Query(params): Query<RequestParams>,
     State(state): State<SharedState>, 
     mut request: Request<B>,
     next: Next<B>,
 ) -> impl IntoResponse {
-    if let Some(auth) = auth {
-        if let Some(user) = state.users.iter().find(|u| u.name == auth.username()) {
-            debug!("REQUEST PW: {} CONFIG USER: {:?}",auth.password(),user);
-            if user.password == auth.password() {
-                request.extensions_mut().insert(user.role);
-                return next.run(request).await;
+    let mut opt_username = None;
+    let mut opt_password = None;
+    if let Some(username) = params.username.as_deref() {
+        if let Some(password) = params.password.as_deref() {
+            opt_username = Some(username);
+            opt_password = Some(password);
+        }        
+    } else if let Some(auth) = auth.as_deref() {
+        opt_username = Some(auth.username());
+        opt_password = Some(auth.password());
+    }
+    if let Some(username) = opt_username {
+        if let Some(password) = opt_password {
+            if let Some(user) = state.users.iter().find(|u| u.name == username) {
+                debug!("REQUEST PW: {} CONFIG USER: {:?}",password,user);
+                if user.password == password {
+                    request.extensions_mut().insert(user.role);
+                    return next.run(request).await;
+                }
             }
-        }
+        }        
     }
     request.extensions_mut().insert(ConfigUserRole::Guest);
     next.run(request).await
