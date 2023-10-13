@@ -1,7 +1,7 @@
 use axum::{
     routing::{get, delete},
     http::{StatusCode, Uri, header, Request, HeaderValue},
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect},
     Json, Router,
     extract::{Path, State, Query, ConnectInfo, Host}, TypedHeader, headers::{Authorization, authorization::Basic}, middleware::{Next, self}, debug_handler, Extension};
 use axum_server::tls_rustls::RustlsConfig;
@@ -19,8 +19,6 @@ type GameData = HashMap<String,GameTurn>;
 #[derive(Default,Debug)]
 struct SharedData {
     game_data: Mutex<GameData>,
-    client_auth: String,
-    admin_auth: String,
     users: Vec<ConfigUser>,
 }
 
@@ -76,7 +74,6 @@ impl std::fmt::Display for GameCoord {
 struct Config {
     network: ConfigNetwork,
     tls: ConfigTLS,
-    auth: ConfigAuth,
     statics: HashMap<String,ConfigStatic>,
     general: ConfigGeneral,
     users: Vec<ConfigUser>,
@@ -103,13 +100,6 @@ struct ConfigUser {
 struct ConfigStatic {
     uri: String,
     path: String,
-}
-
-#[derive(Deserialize,Default,Debug,Clone)]
-#[serde(default)]
-struct ConfigAuth {
-    client: String,
-    admin: String,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -163,7 +153,6 @@ impl From<ConfigNetwork> for SocketAddr {
 
 #[derive(Deserialize,Default,Debug,Clone)]
 struct RequestParams {
-    auth: Option<String>,
     refresh: Option<usize>,
 }
 
@@ -354,8 +343,6 @@ async fn main() {
     debug!("{:#?}",config);
 
     let shared_state = Arc::new(SharedData { 
-        client_auth: config.auth.client, 
-        admin_auth: config.auth.admin,
         users: config.users,
         ..Default::default()
     });
