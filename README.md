@@ -41,12 +41,13 @@ The users are also stored in the config file.
 An expiration date can be set for game state and a cleanup routine will remove all info for a game id after it has expired.
 
 If you don't want to include the username/password in the request URL (...USER:PASSWORD@...), you can place it in a netrc file and Python will use that automatically.
+
 Format of the file:
-``
+```
 machine ai-wargame.csproject.org
 login USER
 password PASSWORD
-``
+```
 On Unix-like systems (Linux, MacOS), the netrc file should be placed in your HOME directory and named .netrc (~/.netrc).
-On Windows, it should be at C:\USERS\your_user_name\_netrc
+On Windows, it should be at ``C:\USERS\your_user_name\_netrc``
 
