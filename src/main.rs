@@ -121,7 +121,7 @@ enum ConfigTLSType {
 
 #[derive(Deserialize,Default,Debug,Copy,Clone,PartialEq,PartialOrd)]
 #[serde(rename_all = "lowercase")]
-// the order of the roles is important for authentication (admin > user)
+// the order of the roles is important for authentication (admin > user > guest)
 enum ConfigUserRole {
     Guest,
     #[default]
