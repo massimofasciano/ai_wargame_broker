@@ -1,9 +1,9 @@
 use axum::{
     routing::{get, delete},
-    http::{StatusCode, Uri, header},
-    response::{IntoResponse, Redirect},
+    http::{StatusCode, Uri, header, Request, HeaderValue},
+    response::{IntoResponse, Redirect, Response},
     Json, Router,
-    extract::{Path, State, Query, ConnectInfo, Host}};
+    extract::{Path, State, Query, ConnectInfo, Host}, TypedHeader, headers::{Authorization, authorization::Basic}, middleware::{Next, self}, debug_handler, Extension};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::{sync::Mutex, time::sleep};
 use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
@@ -21,6 +21,7 @@ struct SharedData {
     game_data: Mutex<GameData>,
     client_auth: String,
     admin_auth: String,
+    users: Vec<ConfigUser>,
 }
 
 #[derive(Serialize,Default,Debug,Clone)]
@@ -78,6 +79,7 @@ struct Config {
     auth: ConfigAuth,
     statics: HashMap<String,ConfigStatic>,
     general: ConfigGeneral,
+    users: Vec<ConfigUser>,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -86,6 +88,14 @@ struct ConfigGeneral {
     internal: Option<String>,
     expires: Option<u64>,
     cleanup: Option<u64>,
+}
+
+#[derive(Deserialize,Default,Debug,Clone)]
+struct ConfigUser {
+    name: String,
+    #[serde(default)]
+    role: ConfigUserRole,
+    password: String,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
@@ -110,13 +120,23 @@ struct ConfigTLS {
     enabled: ConfigTLSType,
 }
 
-#[derive(Deserialize,Default,Debug,Clone,PartialEq)]
+#[derive(Deserialize,Default,Debug,Copy,Clone,PartialEq)]
 #[serde(rename_all = "lowercase")]
 enum ConfigTLSType {
     #[default]
     Http,
     Https,
     Both,
+}
+
+#[derive(Deserialize,Default,Debug,Copy,Clone,PartialEq,PartialOrd)]
+#[serde(rename_all = "lowercase")]
+// the order of the roles is important for authentication (admin > user)
+enum ConfigUserRole {
+    Guest,
+    #[default]
+    User,
+    Admin,
 }
 
 #[derive(Deserialize,Debug,Clone)]
@@ -155,14 +175,15 @@ struct GameTemplate<'a> {
 }
 
 async fn game_generate(
-    Query(params): Query<RequestParams>,
+    Query(_params): Query<RequestParams>,
+    Extension(role): Extension<ConfigUserRole>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    let auth = params.auth.unwrap_or_default();
-    if auth != state.client_auth {
+    info!("{:?}",role);
+    if role < ConfigUserRole::User {
         debug!("failed auth from {addr}");
-        return StatusCode::UNAUTHORIZED.into_response();
+        return authenticate().into_response();
     }
     let dict = state.game_data.lock().await;
     let mut gameid;
@@ -173,15 +194,17 @@ async fn game_generate(
     (StatusCode::OK, format!("{}\n",gameid)).into_response()
 }
 
+#[debug_handler]
 async fn game_get(
     Path(gameid): Path<String>,
-    Query(params): Query<RequestParams>,
+    Query(_params): Query<RequestParams>,
+    Extension(role): Extension<ConfigUserRole>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> (StatusCode, Json<GameReply>) {
+    info!("{:?}",role);
     let mut reply = GameReply::default();
-    let auth = params.auth.unwrap_or_default();
-    if auth != state.client_auth {
+    if role < ConfigUserRole::User {
         debug!("failed auth from {addr}");
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
@@ -198,14 +221,15 @@ async fn game_get(
 
 async fn game_post(
     Path(gameid): Path<String>,
-    Query(params): Query<RequestParams>,
+    Query(_params): Query<RequestParams>,
+    Extension(role): Extension<ConfigUserRole>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(mut payload): Json<GameTurn>
 ) -> (StatusCode, Json<GameReply>) {
+    info!("{:?}",role);
     let mut reply = GameReply::default();
-    let auth = params.auth.unwrap_or_default();
-    if auth != state.client_auth {
+    if role < ConfigUserRole::User {
         debug!("failed auth from {addr}");
         reply.success = false;
         reply.error = Some(String::from("invalid client auth"));
@@ -222,35 +246,37 @@ async fn game_post(
 
 async fn admin_state(
     Query(params): Query<RequestParams>,
+    Extension(role): Extension<ConfigUserRole>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
+    info!("{:?}",role);
     debug!("request from {addr} for {}{}",hostname,uri.path());
-    let auth = params.auth.unwrap_or_default();
-    if auth != state.admin_auth {
+    if role < ConfigUserRole::Admin {
         error!("failed auth from {addr}");
-        return StatusCode::UNAUTHORIZED.into_response();
+        return authenticate().into_response();
     }
     let dict = state.game_data.lock().await;
     (StatusCode::OK, GameTemplate { refresh: params.refresh, game_data: &dict }.into_response()).into_response()
 }
 
 async fn admin_clear(
-    Query(params): Query<RequestParams>,
+    Query(_params): Query<RequestParams>,
+    Extension(role): Extension<ConfigUserRole>,
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
+    info!("{:?}",role);
     warn!("request from {addr} for {}{}",hostname,uri.path());
-    let auth = params.auth.unwrap_or_default();
-    if auth != state.admin_auth {
+    if role < ConfigUserRole::Admin {
         error!("failed auth from {addr}");
-        return StatusCode::UNAUTHORIZED;
+        return authenticate().into_response();
     }
     let mut dict = state.game_data.lock().await;
     dict.clear();
-    StatusCode::OK
+    (StatusCode::OK, "cleared all games from internal state\n").into_response()
 }
 
 fn get_config_file_name(in_cwd: bool) -> PathBuf {
@@ -285,6 +311,35 @@ async fn cleaner(expires_secs: u64, cleanup_interval_secs: u64, state: SharedSta
     }
 }
 
+fn authenticate() -> impl IntoResponse {
+    (
+        [
+            (header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"game broker\"")),
+        ],
+        StatusCode::UNAUTHORIZED
+    )
+}
+
+async fn auth_basic<B>(
+    auth: Option<TypedHeader<Authorization<Basic>>>,
+    State(state): State<SharedState>, 
+    mut request: Request<B>,
+    next: Next<B>,
+) -> impl IntoResponse {
+    if let Some(auth) = auth {
+        if let Some(user) = state.users.iter().find(|u| u.name == auth.username()) {
+            info!("{:#?}",user);
+            info!("{} {}",auth.username(),auth.password());
+            if user.password == auth.password() {
+                request.extensions_mut().insert(user.role);
+                return next.run(request).await;
+            }
+        }
+    }
+    request.extensions_mut().insert(ConfigUserRole::Guest);
+    next.run(request).await
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -301,6 +356,7 @@ async fn main() {
     let shared_state = Arc::new(SharedData { 
         client_auth: config.auth.client, 
         admin_auth: config.auth.admin,
+        users: config.users,
         ..Default::default()
     });
 
@@ -309,6 +365,7 @@ async fn main() {
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/clear", delete(admin_clear))
+        .layer(middleware::from_fn_with_state(shared_state.clone(), auth_basic))
         .with_state(shared_state.clone());
 
     for (_, static_dir) in config.statics {

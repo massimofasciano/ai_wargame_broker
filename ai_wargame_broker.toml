@@ -20,3 +20,13 @@ enabled = "both"
 internal = "/internal"
 expires = 5
 cleanup = 1
+
+[[users]]
+name = "root"
+password = "ag3nt"
+role = "admin"
+
+[[users]]
+name = "student"
+password = "s3cr3t"
+role = "user"

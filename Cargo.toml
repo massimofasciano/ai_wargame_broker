@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.6.20", features = ["headers"] }
+axum = { version = "0.6.20", features = ["headers","macros"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 axum-server-dual-protocol = "0.5.2"
 serde = { version = "1.0.188", features = ["derive"] }
