@@ -169,7 +169,7 @@ async fn game_generate(
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    info!("{:?}",role);
+    debug!("Role: {:?}",role);
     if role < ConfigUserRole::User {
         debug!("failed auth from {addr}");
         return authenticate().into_response();
@@ -191,7 +191,7 @@ async fn game_get(
     State(state): State<SharedState>, 
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> (StatusCode, Json<GameReply>) {
-    info!("{:?}",role);
+    debug!("Role: {:?}",role);
     let mut reply = GameReply::default();
     if role < ConfigUserRole::User {
         debug!("failed auth from {addr}");
@@ -216,7 +216,7 @@ async fn game_post(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(mut payload): Json<GameTurn>
 ) -> (StatusCode, Json<GameReply>) {
-    info!("{:?}",role);
+    debug!("Role: {:?}",role);
     let mut reply = GameReply::default();
     if role < ConfigUserRole::User {
         debug!("failed auth from {addr}");
@@ -240,7 +240,7 @@ async fn admin_state(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
-    info!("{:?}",role);
+    debug!("Role: {:?}",role);
     debug!("request from {addr} for {}{}",hostname,uri.path());
     if role < ConfigUserRole::Admin {
         error!("failed auth from {addr}");
@@ -257,7 +257,7 @@ async fn admin_clear(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     uri: Uri, Host(hostname): Host,
 ) -> impl IntoResponse {
-    info!("{:?}",role);
+    debug!("Role: {:?}",role);
     warn!("request from {addr} for {}{}",hostname,uri.path());
     if role < ConfigUserRole::Admin {
         error!("failed auth from {addr}");
@@ -317,8 +317,7 @@ async fn auth_basic<B>(
 ) -> impl IntoResponse {
     if let Some(auth) = auth {
         if let Some(user) = state.users.iter().find(|u| u.name == auth.username()) {
-            info!("{:#?}",user);
-            info!("{} {}",auth.username(),auth.password());
+            debug!("REQUEST PW: {} CONFIG USER: {:?}",auth.password(),user);
             if user.password == auth.password() {
                 request.extensions_mut().insert(user.role);
                 return next.run(request).await;
