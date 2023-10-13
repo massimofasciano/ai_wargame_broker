@@ -48,6 +48,6 @@ machine ai-wargame.csproject.org
 login USER
 password PASSWORD
 ```
-On Unix-like systems (Linux, MacOS), the netrc file should be placed in your HOME directory and named .netrc (~/.netrc).
+On Unix-like systems (Linux, MacOS), the netrc file should be placed in your HOME directory and named ``.netrc``.
 On Windows, it should be at ``C:\USERS\your_user_name\_netrc``
 
