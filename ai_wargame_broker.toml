@@ -1,14 +1,6 @@
-[statics.demo]
-uri = "/demo"
-path = "../ai_wargame_web"
-
 [network]
 ip = "0.0.0.0"
 port = 8000
-
-[auth]
-client = "s3cr3t" 
-admin = "ag3nt"
 
 [tls]
 cert = "cert.pem"
@@ -20,6 +12,10 @@ enabled = "both"
 internal = "/internal"
 expires = 5
 cleanup = 1
+
+[[statics]]
+uri = "/demo"
+path = "../ai_wargame_web"
 
 [[users]]
 name = "root"

@@ -74,7 +74,7 @@ impl std::fmt::Display for GameCoord {
 struct Config {
     network: ConfigNetwork,
     tls: ConfigTLS,
-    statics: HashMap<String,ConfigStatic>,
+    statics: Vec<ConfigStatic>,
     general: ConfigGeneral,
     users: Vec<ConfigUser>,
 }
@@ -355,7 +355,7 @@ async fn main() {
         .layer(middleware::from_fn_with_state(shared_state.clone(), auth_basic))
         .with_state(shared_state.clone());
 
-    for (_, static_dir) in config.statics {
+    for static_dir in config.statics {
         let trace_layer = TraceLayer::new_for_http()
             .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::TRACE))
             .on_response(trace::DefaultOnResponse::new().level(tracing::Level::DEBUG));
