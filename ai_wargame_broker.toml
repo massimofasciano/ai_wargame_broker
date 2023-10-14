@@ -10,8 +10,10 @@ enabled = "both"
 
 [general]
 internal = "/internal"
-expires = 5
-cleanup = 1
+expires = 120
+cleanup = 30
+# role for unauthenticated users (defaults to guest)
+# guest = "user"
 
 [[statics]]
 uri = "/demo"

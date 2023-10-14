@@ -20,6 +20,7 @@ type GameData = HashMap<String,GameTurn>;
 struct SharedData {
     game_data: Mutex<GameData>,
     users: Vec<ConfigUser>,
+    guest_role: ConfigUserRole,
 }
 
 #[derive(Serialize,Default,Debug,Clone)]
@@ -85,12 +86,14 @@ struct ConfigGeneral {
     internal: Option<String>,
     expires: Option<u64>,
     cleanup: Option<u64>,
+    #[serde(default = "ConfigUserRole::guest")]
+    guest: ConfigUserRole,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
 struct ConfigUser {
     name: String,
-    #[serde(default)]
+    #[serde(default = "ConfigUserRole::user")]
     role: ConfigUserRole,
     password: String,
 }
@@ -123,10 +126,15 @@ enum ConfigTLSType {
 #[serde(rename_all = "lowercase")]
 // the order of the roles is important for authentication (admin > user > guest)
 enum ConfigUserRole {
-    Guest,
     #[default]
+    Guest,
     User,
     Admin,
+}
+
+impl ConfigUserRole {
+    fn guest() -> Self { Self::Guest }
+    fn user() -> Self { Self::User }
 }
 
 #[derive(Deserialize,Debug,Clone)]
@@ -319,20 +327,22 @@ async fn auth_basic<B>(
     next: Next<B>,
 ) -> impl IntoResponse {
     let mut opt_username = None;
-    let mut opt_password = None;
-    if let Some(username) = params.username.as_deref() {
-        if let Some(password) = params.password.as_deref() {
-            opt_username = Some(username);
-            opt_password = Some(password);
-        }        
-    } else if let Some(auth) = auth.as_deref() {
+    let mut opt_password = Some("");
+    if let Some(auth) = auth.as_deref() {
         opt_username = Some(auth.username());
         opt_password = Some(auth.password());
     }
+    if let Some(username) = params.username.as_deref() {
+        opt_username = Some(username);
+    } 
+    if let Some(password) = params.password.as_deref() {
+        opt_password = Some(password);
+    } 
     if let Some(username) = opt_username {
         if let Some(password) = opt_password {
+            debug!("REQUEST username: {} password: {}",username,password);
             if let Some(user) = state.users.iter().find(|u| u.name == username) {
-                debug!("REQUEST PW: {} CONFIG USER: {:?}",password,user);
+                debug!("CONFIG USER: {:?}",user);
                 if user.password == password {
                     request.extensions_mut().insert(user.role);
                     return next.run(request).await;
@@ -340,7 +350,7 @@ async fn auth_basic<B>(
             }
         }        
     }
-    request.extensions_mut().insert(ConfigUserRole::Guest);
+    request.extensions_mut().insert(state.guest_role);
     next.run(request).await
 }
 
@@ -359,6 +369,7 @@ async fn main() {
 
     let shared_state = Arc::new(SharedData { 
         users: config.users,
+        guest_role: config.general.guest,
         ..Default::default()
     });
 
