@@ -20,7 +20,7 @@ type GameData = HashMap<String,GameTurn>;
 struct SharedData {
     game_data: Mutex<GameData>,
     users: Vec<ConfigUser>,
-    guest_role: ConfigUserRole,
+    unauthenticated_role: ConfigUserRole,
 }
 
 #[derive(Serialize,Default,Debug,Clone)]
@@ -86,14 +86,14 @@ struct ConfigGeneral {
     internal: Option<String>,
     expires: Option<u64>,
     cleanup: Option<u64>,
-    #[serde(default = "ConfigUserRole::guest")]
-    guest: ConfigUserRole,
+    #[serde(default = "ConfigUserRole::default_unauthenticated")]
+    unauthenticated: ConfigUserRole,
 }
 
 #[derive(Deserialize,Default,Debug,Clone)]
 struct ConfigUser {
     name: String,
-    #[serde(default = "ConfigUserRole::user")]
+    #[serde(default = "ConfigUserRole::default_user")]
     role: ConfigUserRole,
     password: String,
 }
@@ -133,8 +133,8 @@ enum ConfigUserRole {
 }
 
 impl ConfigUserRole {
-    fn guest() -> Self { Self::Guest }
-    fn user() -> Self { Self::User }
+    fn default_unauthenticated() -> Self { Self::Guest }
+    fn default_user() -> Self { Self::User }
 }
 
 #[derive(Deserialize,Debug,Clone)]
@@ -350,7 +350,7 @@ async fn auth_basic<B>(
             }
         }        
     }
-    request.extensions_mut().insert(state.guest_role);
+    request.extensions_mut().insert(state.unauthenticated_role);
     next.run(request).await
 }
 
@@ -369,7 +369,7 @@ async fn main() {
 
     let shared_state = Arc::new(SharedData { 
         users: config.users,
-        guest_role: config.general.guest,
+        unauthenticated_role: config.general.unauthenticated,
         ..Default::default()
     });
 

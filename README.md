@@ -60,3 +60,43 @@ password PASSWORD
 On Unix-like systems (Linux, MacOS), the netrc file should be placed in your HOME directory and named ``.netrc``.
 On Windows, it should be at ``C:\USERS\your_user_name\_netrc``
 
+Example config file (``ai_wargame.broker.toml``):
+```toml
+[network]
+ip = "0.0.0.0"
+# ip = "[::]"
+port = 8000
+
+[tls]
+cert = "cert.pem"
+key = "privkey.pem"
+#cert = "/etc/letsencrypt/live/DOMAIN/fullchain.pem"
+#key = "/etc/letsencrypt/live/DOMAIN/privkey.pem"
+# enable http, https or both
+enabled = "both"
+
+[general]
+internal = "/demo/internal"
+expires = 600
+cleanup = 60
+# role for unauthenticated users (defaults to guest)
+# unauthenticated = "user"
+
+# array of static file trees
+
+[[statics]]
+uri = "/demo/live"
+path = "../ai_wargame_web"
+
+# array of users
+
+[[users]]
+name = "root"
+password = "ag3nt"
+role = "admin"
+
+[[users]]
+name = "student"
+password = "s3cr3t"
+role = "user"
+```
