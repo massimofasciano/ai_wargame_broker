@@ -378,7 +378,6 @@ async fn main() {
         .route("/game/:gameid", get(game_get).post(game_post))
         .route("/admin/state", get(admin_state))
         .route("/admin/clear", delete(admin_clear))
-        .layer(middleware::from_fn_with_state(shared_state.clone(), auth_basic))
         .with_state(shared_state.clone());
 
     for static_dir in config.statics {
@@ -430,10 +429,12 @@ async fn main() {
         }
     }
 
+    // authentication middleware
+    app = app.layer(middleware::from_fn_with_state(shared_state.clone(), auth_basic));
+
     if let Some(interval_secs) = config.general.cleanup {
         if let Some(expires_secs) = config.general.expires {
             tokio::spawn(cleaner(expires_secs, interval_secs, shared_state.clone()));
-
         }
     }
 
