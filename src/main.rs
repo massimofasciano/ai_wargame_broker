@@ -3,9 +3,9 @@ use axum::{
     http::{StatusCode, Uri, header, Request, HeaderValue},
     response::{IntoResponse, Redirect},
     Json, Router,
-    extract::{Path, State, Query, ConnectInfo, Host}, TypedHeader, headers::{Authorization, authorization::Basic}, middleware::{Next, self}, debug_handler, Extension, error_handling::HandleErrorLayer, BoxError};
+    extract::{Path, State, Query, ConnectInfo, Host}, TypedHeader, headers::{Authorization, authorization::Basic}, middleware::{Next, self}, Extension, error_handling::HandleErrorLayer, BoxError};
 use axum_server::tls_rustls::RustlsConfig;
-use tokio::{sync::{Mutex, RwLock}, time::sleep};
+use tokio::{sync::RwLock, time::sleep};
 use tower::{ServiceBuilder, timeout::TimeoutLayer};
 use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
 use tracing::{info, debug, warn, error};
@@ -188,7 +188,6 @@ async fn game_generate(
     let mut gameid;
     loop {
         gameid = nanoid!(8);
-        // let dict = state.game_data.lock().await;
         let dict = state.game_data.read().await;
         if dict.get(&gameid).is_none() { break; }
     }
@@ -211,7 +210,6 @@ async fn game_get(
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     reply.success = true;
-    // let dict = state.game_data.lock().await;
     let dict = state.game_data.read().await;
     reply.data = dict.get(&gameid).map(Clone::clone);
     if let Some(payload) = reply.data.as_ref() {
@@ -239,7 +237,6 @@ async fn game_post(
     payload.updated = Some(SystemTime::now());
     info!("game {} turn {:03} move {} -> {} written from {addr}",gameid,payload.turn,payload.from,payload.to);
     reply.success = true;
-    // let mut dict = state.game_data.lock().await;
     let mut dict = state.game_data.write().await;
     dict.insert(gameid, payload);
     reply.data = Some(payload);
@@ -259,7 +256,6 @@ async fn admin_state(
         error!("failed auth from {addr}");
         return authenticate().into_response();
     }
-    // let dict = state.game_data.lock().await;
     let dict = state.game_data.read().await;
     (StatusCode::OK, GameTemplate { refresh: params.refresh, game_data: &dict }.into_response()).into_response()
 }
@@ -277,7 +273,6 @@ async fn admin_clear(
         error!("failed auth from {addr}");
         return authenticate().into_response();
     }
-    // let mut dict = state.game_data.lock().await;
     let mut dict = state.game_data.write().await;
     dict.clear();
     (StatusCode::OK, "cleared all games from internal state\n").into_response()
@@ -299,7 +294,6 @@ async fn cleaner(expires_secs: u64, cleanup_interval_secs: u64, state: SharedSta
     loop {
         sleep(Duration::from_secs(cleanup_interval_secs)).await;
         debug!("cleaner starting");
-        // let mut dict = state.game_data.lock().await;
         let mut dict = state.game_data.write().await;
         dict.retain(|gameid, turndata| {
             if let Some(last_update) = turndata.updated {
