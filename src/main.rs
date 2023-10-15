@@ -3,9 +3,10 @@ use axum::{
     http::{StatusCode, Uri, header, Request, HeaderValue},
     response::{IntoResponse, Redirect},
     Json, Router,
-    extract::{Path, State, Query, ConnectInfo, Host}, TypedHeader, headers::{Authorization, authorization::Basic}, middleware::{Next, self}, debug_handler, Extension};
+    extract::{Path, State, Query, ConnectInfo, Host}, TypedHeader, headers::{Authorization, authorization::Basic}, middleware::{Next, self}, debug_handler, Extension, error_handling::HandleErrorLayer, BoxError};
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::{sync::Mutex, time::sleep};
+use tower::{ServiceBuilder, timeout::TimeoutLayer};
 use tower_http::{services::ServeDir, trace::{TraceLayer, self}};
 use tracing::{info, debug, warn, error};
 use std::{net::SocketAddr, sync::Arc, collections::HashMap, fs::read_to_string, str::FromStr, path::PathBuf, time::{Duration, SystemTime}};
@@ -354,6 +355,20 @@ async fn auth_basic<B>(
     next.run(request).await
 }
 
+async fn handle_timeout_error(err: BoxError) -> (StatusCode, String) {
+    if err.is::<tower::timeout::error::Elapsed>() {
+        (
+            StatusCode::REQUEST_TIMEOUT,
+            "Request took too long".to_string(),
+        )
+    } else {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unhandled internal error: {}", err),
+        )
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -431,6 +446,13 @@ async fn main() {
 
     // authentication middleware
     app = app.layer(middleware::from_fn_with_state(shared_state.clone(), auth_basic));
+
+    // timeout handling
+    app = app.layer(
+        ServiceBuilder::new()
+            .layer(HandleErrorLayer::new(handle_timeout_error))
+            .layer(TimeoutLayer::new(Duration::from_secs(10)))
+    );
 
     if let Some(interval_secs) = config.general.cleanup {
         if let Some(expires_secs) = config.general.expires {
