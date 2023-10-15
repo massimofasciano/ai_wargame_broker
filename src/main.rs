@@ -210,10 +210,10 @@ async fn game_get(
         reply.error = Some(String::from("invalid client auth"));
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
+    reply.success = true;
     // let dict = state.game_data.lock().await;
     let dict = state.game_data.read().await;
     reply.data = dict.get(&gameid).map(Clone::clone);
-    reply.success = true;
     if let Some(payload) = reply.data.as_ref() {
         debug!("game {} turn {:03} move {} -> {} read from {addr}",gameid,payload.turn,payload.from,payload.to);
     }
@@ -237,12 +237,12 @@ async fn game_post(
         return (StatusCode::UNAUTHORIZED, Json(reply));
     }
     payload.updated = Some(SystemTime::now());
+    info!("game {} turn {:03} move {} -> {} written from {addr}",gameid,payload.turn,payload.from,payload.to);
+    reply.success = true;
     // let mut dict = state.game_data.lock().await;
     let mut dict = state.game_data.write().await;
-    info!("game {} turn {:03} move {} -> {} written from {addr}",gameid,payload.turn,payload.from,payload.to);
     dict.insert(gameid, payload);
     reply.data = Some(payload);
-    reply.success = true;
     (StatusCode::OK, Json(reply))
 }
 
